@@ -12,8 +12,7 @@ namespace CustomTaskScheduler
     /// <seealso cref="System.Threading.Tasks.TaskScheduler" />
     public class CustomTaskScheduler : TaskScheduler
     {
-        [ThreadStatic]
-        private static bool _itemsProcessingInCurrentThread;
+        [ThreadStatic] private static bool _itemsProcessingInCurrentThread;
 
         private readonly int _maxDegreeOfParallelism;
         private readonly LinkedList<Task> _tasks;
@@ -35,7 +34,7 @@ namespace CustomTaskScheduler
         public CustomTaskScheduler(int maxDegreeOfParallelism)
         {
             if (maxDegreeOfParallelism < 1)
-                throw new ArgumentOutOfRangeException("maxDegreeOfParallelism");
+                throw new ArgumentOutOfRangeException(nameof(maxDegreeOfParallelism));
 
             this._maxDegreeOfParallelism = maxDegreeOfParallelism;
             this._tasks = new LinkedList<Task>();
@@ -68,11 +67,11 @@ namespace CustomTaskScheduler
                 this._tasks.AddLast(task);
             }
 
-            if (this._runningOrQueuedCount < this._maxDegreeOfParallelism)
-            {
-                this._runningOrQueuedCount++;
-                this.RunTasks();
-            }
+            if (this._runningOrQueuedCount >= this._maxDegreeOfParallelism)
+                return;
+
+            this._runningOrQueuedCount++;
+            this.RunTasks();
         }
 
         protected override bool TryDequeue(Task task)
@@ -96,7 +95,47 @@ namespace CustomTaskScheduler
 
         private void RunTasks()
         {
-            throw new NotImplementedException();
+            ThreadPool.UnsafeQueueUserWorkItem(_ =>
+            {
+                var taskList = new List<Task>();
+
+                CustomTaskScheduler._itemsProcessingInCurrentThread = true;
+
+                try
+                {
+                    while (true)
+                    {
+                        lock (this._tasks)
+                        {
+                            if (this._tasks.Count == 0)
+                            {
+                                this._runningOrQueuedCount--;
+                                break;
+                            }
+
+                            var task = this._tasks.First.Value;
+                            taskList.Add(task);
+                            this._tasks.RemoveFirst();
+                        }
+                    }
+
+                    if (taskList.Count == 1)
+                    {
+                        base.TryExecuteTask(taskList[0]);
+                    }
+                    else if (taskList.Count > 0)
+                    {
+                        var batches = taskList.GroupBy(task => taskList.IndexOf(task) / this._maxDegreeOfParallelism);
+
+                        foreach (var batch in batches)
+                            batch.AsParallel().ForAll(task => base.TryExecuteTask(task));
+                    }
+                }
+                finally
+                {
+                    CustomTaskScheduler._itemsProcessingInCurrentThread = false;
+                }
+            }, null);
         }
     }
 }
