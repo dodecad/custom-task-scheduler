@@ -12,7 +12,8 @@ namespace CustomTaskScheduler
     /// <seealso cref="System.Threading.Tasks.TaskScheduler" />
     public class CustomTaskScheduler : TaskScheduler
     {
-        [ThreadStatic] private static bool _itemsProcessingInCurrentThread;
+        [ThreadStatic]
+        private static bool _itemsProcessingInCurrentThread;
 
         private readonly int _maxDegreeOfParallelism;
         private readonly LinkedList<Task> _tasks;
